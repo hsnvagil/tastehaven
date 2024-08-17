@@ -2,6 +2,9 @@
 using Taste_Haven_API.Data;
 using Taste_Haven_API.Models;
 using System.Net;
+using Taste_Haven_API.Models.Dto;
+using Taste_Haven_API.Services;
+using Taste_Haven_API.Utility;
 
 namespace Taste_Haven_API.Controllers;
 
@@ -10,12 +13,14 @@ namespace Taste_Haven_API.Controllers;
 public class MenuItemController : ControllerBase
 {
 	private readonly ApplicationDbContext _db;
+	private readonly IBlobService _blobService;
 	private ApiResponse _response;
 
-	public MenuItemController(ApplicationDbContext db)
+	public MenuItemController(ApplicationDbContext db, IBlobService blobService)
 	{
 		_db = db;
 		_response = new ApiResponse();
+		_blobService = blobService;
 	}
 
 	[HttpGet]
@@ -26,12 +31,13 @@ public class MenuItemController : ControllerBase
 		return Ok(_response);
 	}
 
-	[HttpGet("{id:int}")]
+	[HttpGet("{id:int}", Name = "GetMenuItem")]
 	public async Task<IActionResult> GetMenuItem(int id)
 	{
 		if(id == 0)
 		{
 			_response.StatusCode = HttpStatusCode.BadRequest;
+			_response.IsSuccess = false;
 			return BadRequest(_response);
 		}
 
@@ -40,11 +46,153 @@ public class MenuItemController : ControllerBase
 		if(menuItem == null)
 		{
 			_response.StatusCode = HttpStatusCode.NotFound;
+			_response.IsSuccess = false;
 			return NotFound(_response);
 		}
 
 		_response.Result = menuItem;
 		_response.StatusCode = HttpStatusCode.OK;
 		return Ok(_response);
+	}
+
+	[HttpPost]
+	public async Task<ActionResult<ApiResponse>> CreateMenuItem([FromForm] MenuItemCreateDTO menuItemCreateDto)
+	{
+		try
+		{
+			if (ModelState.IsValid)
+			{
+				if (menuItemCreateDto.File == null || menuItemCreateDto.File.Length == 0)
+				{
+					_response.StatusCode = HttpStatusCode.BadRequest;
+					_response.IsSuccess = false;
+					return BadRequest();
+				}
+
+				string fileName = $"{Guid.NewGuid()}{Path.GetExtension(menuItemCreateDto.File.FileName)}";
+
+				MenuItem menuItemToCreate = new()
+				{
+					Name = menuItemCreateDto.Name,
+					Price = menuItemCreateDto.Price,
+					Category = menuItemCreateDto.Category,
+					SpecialTag = menuItemCreateDto.SpecialTag,
+					Description = menuItemCreateDto.Description,
+					Image = await _blobService.UploadBlob(fileName, SD.SD_Storage_Container, menuItemCreateDto.File)
+				};
+				_db.MenuItems.Add(menuItemToCreate);
+				_db.SaveChanges();
+				_response.Result = menuItemCreateDto;
+				_response.StatusCode = HttpStatusCode.Created;
+				return CreatedAtRoute("GetMenuItem", new { id = menuItemToCreate.Id }, _response);
+			}
+			else
+			{
+				_response.IsSuccess = false;
+			}
+		}
+		catch (Exception e)
+		{
+			_response.IsSuccess = false;
+			_response.ErrorMessages = [e.ToString()];
+			throw;
+		}
+
+		return _response;
+	}
+	
+	[HttpPut("{id:int}")]
+	public async Task<ActionResult<ApiResponse>> UpdateMenuItem(int id, [FromForm] MenuItemUpdateDTO menuItemUpdateDto)
+	{
+		try
+		{
+			if (ModelState.IsValid)
+			{
+				
+				if (menuItemUpdateDto == null || id != menuItemUpdateDto.Id)
+				{
+					_response.StatusCode = HttpStatusCode.BadRequest;
+					_response.IsSuccess = false;
+					return BadRequest();
+				}
+				MenuItem menuItemFromDb = await _db.MenuItems.FindAsync(id);
+				if (menuItemFromDb == null)
+				{
+					_response.StatusCode = HttpStatusCode.BadRequest;
+					_response.IsSuccess = false;
+					return BadRequest();
+				}
+				
+				menuItemFromDb.Name = menuItemUpdateDto.Name;
+				menuItemFromDb.Price = menuItemUpdateDto.Price;
+				menuItemFromDb.Category = menuItemUpdateDto.Category;
+				menuItemFromDb.SpecialTag = menuItemUpdateDto.SpecialTag;
+				menuItemFromDb.Description = menuItemUpdateDto.Description;
+				
+				if (menuItemUpdateDto.File != null && menuItemUpdateDto.File.Length > 0)
+				{
+					string fileName = $"{Guid.NewGuid()}{Path.GetExtension(menuItemUpdateDto.File.FileName)}";
+					await _blobService.DeleteBlob(menuItemFromDb.Image.Split('/').Last(), SD.SD_Storage_Container);
+					menuItemFromDb.Image =
+						await _blobService.UploadBlob(fileName, SD.SD_Storage_Container, menuItemUpdateDto.File);
+				}
+				
+				_db.MenuItems.Update(menuItemFromDb);
+				_db.SaveChanges();
+				_response.StatusCode = HttpStatusCode.NoContent;
+				return Ok(_response);
+			}
+			else
+			{
+				_response.IsSuccess = false;
+			}
+		}
+		catch (Exception e)
+		{
+			_response.IsSuccess = false;
+			_response.ErrorMessages = [e.ToString()];
+			throw;
+		}
+
+		return _response;
+	}
+
+	[HttpDelete("{id:int}")]
+	public async Task<ActionResult<ApiResponse>> DeleteMenuItem(int id)
+	{
+		try
+		{
+			if (id == 0)
+			{
+				_response.StatusCode = HttpStatusCode.BadRequest;
+				_response.IsSuccess = false;
+
+				return BadRequest();
+			}
+
+			MenuItem menuItemForDb = await _db.MenuItems.FindAsync(id);
+			if (menuItemForDb == null)
+			{
+				_response.StatusCode = HttpStatusCode.BadRequest;
+				_response.IsSuccess = false;
+				
+				return BadRequest();
+			}
+
+			await _blobService.DeleteBlob(menuItemForDb.Image.Split("/").Last(), SD.SD_Storage_Container);
+			int milliSeconds = 2000;
+			Thread.Sleep(milliSeconds);
+
+			_db.MenuItems.Remove(menuItemForDb);
+			_db.SaveChanges();
+			_response.StatusCode = HttpStatusCode.NoContent;
+			return Ok(_response);
+		}
+		catch (Exception e)
+		{
+			_response.IsSuccess = false;
+			_response.ErrorMessages = [e.ToString()];
+			throw;
+		}
 	}
 }
