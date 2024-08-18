@@ -22,12 +22,12 @@ function MenuItemCard(props: Props) {
                 </Link>
 
 
-            <div className="card-body d-flex flex-column">
-                <Link className={"text-decoration-none text-dark"} to={`/menuItemDetails/${props.menuItem.id}`}>
-                    <h5 className="card-title">{props.menuItem.name}</h5>
-                </Link>
+                <div className="card-body d-flex flex-column">
+                    <Link className={"text-decoration-none text-dark"} to={`/menuItemDetails/${props.menuItem.id}`}>
+                        <h5 className="card-title">{props.menuItem.name}</h5>
+                    </Link>
 
-                <h6 className="card-subtitle mb-2 text-muted">{props.menuItem.category}</h6>
+                    <h6 className="card-subtitle mb-2 text-muted">{props.menuItem.category}</h6>
 
                     <p className="card-text flex-grow-1">{props.menuItem.description}</p>
 
