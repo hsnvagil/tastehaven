@@ -1,198 +1,118 @@
-﻿using Microsoft.AspNetCore.Mvc;
-using Taste_Haven_API.Data;
-using Taste_Haven_API.Models;
-using System.Net;
+﻿#region
+
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Taste_Haven_API.Middlewares.Exceptions;
 using Taste_Haven_API.Models.Dto;
 using Taste_Haven_API.Services;
-using Taste_Haven_API.Utility;
+
+#endregion
 
 namespace Taste_Haven_API.Controllers;
 
-[Route("api/MenuItem")]
+[Route("api/menu-item")]
 [ApiController]
-public class MenuItemController : ControllerBase
+public class MenuItemController(IMenuItemService menuItemService) : ControllerBase
 {
-	private readonly ApplicationDbContext _db;
-	private readonly IBlobService _blobService;
-	private ApiResponse _response;
+    [HttpGet]
+    public async Task<IActionResult> GetMenuItems()
+    {
+        try
+        {
+            var menuItems = await menuItemService.GetAllAsync();
+            return Ok(new { Result = menuItems, IsSuccess = true });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { Message = "An unexpected error occurred.", IsSuccess = false });
+        }
+    }
 
-	public MenuItemController(ApplicationDbContext db, IBlobService blobService)
-	{
-		_db = db;
-		_response = new ApiResponse();
-		_blobService = blobService;
-	}
+    [HttpGet("{id:int}", Name = "GetMenuItem")]
+    public async Task<IActionResult> GetMenuItemById(int id)
+    {
+        try
+        {
+            var menuItem = await menuItemService.GetByIdAsync(id);
+            return Ok(new { Result = menuItem, IsSuccess = true });
+        }
+        catch (InvalidMenuItemIdException ex)
+        {
+            return BadRequest(new { ex.Message, IsSuccess = false });
+        }
+        catch (MenuItemNotFoundException ex)
+        {
+            return NotFound(new { ex.Message, IsSuccess = false });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { Message = "An unexpected error occurred.", IsSuccess = false });
+        }
+    }
 
-	[HttpGet]
-	public async Task<IActionResult> GetMenuItems()
-	{
-		_response.Result = _db.MenuItems;
-		_response.StatusCode = HttpStatusCode.OK;
-		return Ok(_response);
-	}
+    [Authorize]
+    [HttpPost]
+    public async Task<ActionResult> AddMenuItem([FromForm] MenuItemCreateDto menuItemCreateDto)
+    {
+        if (!ModelState.IsValid) return BadRequest(new { Message = "Model is not valid", IsSuccess = false });
 
-	[HttpGet("{id:int}", Name = "GetMenuItem")]
-	public async Task<IActionResult> GetMenuItem(int id)
-	{
-		if(id == 0)
-		{
-			_response.StatusCode = HttpStatusCode.BadRequest;
-			_response.IsSuccess = false;
-			return BadRequest(_response);
-		}
+        try
+        {
+            var menuItemId = await menuItemService.AddAsync(menuItemCreateDto);
+            return CreatedAtRoute("GetMenuItem", new { id = menuItemId },
+                new { Result = menuItemId, IsSuccess = true });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { ex.Message, IsSuccess = false });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { ex.Message, IsSuccess = false });
+        }
+    }
 
-		MenuItem menuItem = _db.MenuItems.FirstOrDefault(u => u.Id == id);
+    [Authorize]
+    [HttpPut("{id:int}")]
+    public async Task<ActionResult> UpdateMenuItem(int id, [FromForm] MenuItemUpdateDto menuItemUpdateDto)
+    {
+        if (!ModelState.IsValid) return BadRequest(new { Message = "Invalid model data", IsSuccess = false });
 
-		if(menuItem == null)
-		{
-			_response.StatusCode = HttpStatusCode.NotFound;
-			_response.IsSuccess = false;
-			return NotFound(_response);
-		}
+        try
+        {
+            await menuItemService.UpdateAsync(id, menuItemUpdateDto);
+            return NoContent();
+        }
+        catch (MenuItemNotFoundException ex)
+        {
+            return NotFound(new { ex.Message, IsSuccess = false });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { Message = "An unexpected error occurred.", IsSuccess = false });
+        }
+    }
 
-		_response.Result = menuItem;
-		_response.StatusCode = HttpStatusCode.OK;
-		return Ok(_response);
-	}
-
-	[HttpPost]
-	public async Task<ActionResult<ApiResponse>> CreateMenuItem([FromForm] MenuItemCreateDTO menuItemCreateDto)
-	{
-		try
-		{
-			if (ModelState.IsValid)
-			{
-				if (menuItemCreateDto.File == null || menuItemCreateDto.File.Length == 0)
-				{
-					_response.StatusCode = HttpStatusCode.BadRequest;
-					_response.IsSuccess = false;
-					return BadRequest();
-				}
-
-				string fileName = $"{Guid.NewGuid()}{Path.GetExtension(menuItemCreateDto.File.FileName)}";
-
-				MenuItem menuItemToCreate = new()
-				{
-					Name = menuItemCreateDto.Name,
-					Price = menuItemCreateDto.Price,
-					Category = menuItemCreateDto.Category,
-					SpecialTag = menuItemCreateDto.SpecialTag,
-					Description = menuItemCreateDto.Description,
-					Image = await _blobService.UploadBlob(fileName, SD.SD_Storage_Container, menuItemCreateDto.File)
-				};
-				_db.MenuItems.Add(menuItemToCreate);
-				_db.SaveChanges();
-				_response.Result = menuItemCreateDto;
-				_response.StatusCode = HttpStatusCode.Created;
-				return CreatedAtRoute("GetMenuItem", new { id = menuItemToCreate.Id }, _response);
-			}
-			else
-			{
-				_response.IsSuccess = false;
-			}
-		}
-		catch (Exception e)
-		{
-			_response.IsSuccess = false;
-			_response.ErrorMessages = [e.ToString()];
-			throw;
-		}
-
-		return _response;
-	}
-	
-	[HttpPut("{id:int}")]
-	public async Task<ActionResult<ApiResponse>> UpdateMenuItem(int id, [FromForm] MenuItemUpdateDTO menuItemUpdateDto)
-	{
-		try
-		{
-			if (ModelState.IsValid)
-			{
-				
-				if (menuItemUpdateDto == null || id != menuItemUpdateDto.Id)
-				{
-					_response.StatusCode = HttpStatusCode.BadRequest;
-					_response.IsSuccess = false;
-					return BadRequest();
-				}
-				MenuItem menuItemFromDb = await _db.MenuItems.FindAsync(id);
-				if (menuItemFromDb == null)
-				{
-					_response.StatusCode = HttpStatusCode.BadRequest;
-					_response.IsSuccess = false;
-					return BadRequest();
-				}
-				
-				menuItemFromDb.Name = menuItemUpdateDto.Name;
-				menuItemFromDb.Price = menuItemUpdateDto.Price;
-				menuItemFromDb.Category = menuItemUpdateDto.Category;
-				menuItemFromDb.SpecialTag = menuItemUpdateDto.SpecialTag;
-				menuItemFromDb.Description = menuItemUpdateDto.Description;
-				
-				if (menuItemUpdateDto.File != null && menuItemUpdateDto.File.Length > 0)
-				{
-					string fileName = $"{Guid.NewGuid()}{Path.GetExtension(menuItemUpdateDto.File.FileName)}";
-					await _blobService.DeleteBlob(menuItemFromDb.Image.Split('/').Last(), SD.SD_Storage_Container);
-					menuItemFromDb.Image =
-						await _blobService.UploadBlob(fileName, SD.SD_Storage_Container, menuItemUpdateDto.File);
-				}
-				
-				_db.MenuItems.Update(menuItemFromDb);
-				_db.SaveChanges();
-				_response.StatusCode = HttpStatusCode.NoContent;
-				return Ok(_response);
-			}
-			else
-			{
-				_response.IsSuccess = false;
-			}
-		}
-		catch (Exception e)
-		{
-			_response.IsSuccess = false;
-			_response.ErrorMessages = [e.ToString()];
-			throw;
-		}
-
-		return _response;
-	}
-
-	[HttpDelete("{id:int}")]
-	public async Task<ActionResult<ApiResponse>> DeleteMenuItem(int id)
-	{
-		try
-		{
-			if (id == 0)
-			{
-				_response.StatusCode = HttpStatusCode.BadRequest;
-				_response.IsSuccess = false;
-
-				return BadRequest();
-			}
-
-			MenuItem menuItemForDb = await _db.MenuItems.FindAsync(id);
-			if (menuItemForDb == null)
-			{
-				_response.StatusCode = HttpStatusCode.BadRequest;
-				_response.IsSuccess = false;
-				
-				return BadRequest();
-			}
-
-			await _blobService.DeleteBlob(menuItemForDb.Image.Split("/").Last(), SD.SD_Storage_Container);
-			int milliSeconds = 2000;
-			Thread.Sleep(milliSeconds);
-
-			_db.MenuItems.Remove(menuItemForDb);
-			_db.SaveChanges();
-			_response.StatusCode = HttpStatusCode.NoContent;
-			return Ok(_response);
-		}
-		catch (Exception e)
-		{
-			_response.IsSuccess = false;
-			_response.ErrorMessages = [e.ToString()];
-			throw;
-		}
-	}
+    [Authorize]
+    [HttpDelete("{id:int}")]
+    public async Task<ActionResult> DeleteMenuItem(int id)
+    {
+        try
+        {
+            await menuItemService.DeleteAsync(id);
+            return NoContent();
+        }
+        catch (InvalidMenuItemIdException ex)
+        {
+            return BadRequest(new { ex.Message, IsSuccess = false });
+        }
+        catch (MenuItemNotFoundException ex)
+        {
+            return NotFound(new { ex.Message, IsSuccess = false });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { Message = "An unexpected error occurred.", IsSuccess = false });
+        }
+    }
 }

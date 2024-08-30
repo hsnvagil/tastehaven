@@ -1,25 +1,35 @@
+#region
+
 using System.Text;
 using Azure.Storage.Blobs;
-using Microsoft.AspNetCore.Authentication;
+using FluentValidation.AspNetCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using Taste_Haven_API.Data;
+using Taste_Haven_API.Infrastructure.StartUpExtensions;
+using Taste_Haven_API.Mapper;
+using Taste_Haven_API.Middlewares;
 using Taste_Haven_API.Models;
-using Taste_Haven_API.Services;
+using Taste_Haven_API.Validation;
+
+#endregion
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
 {
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultDbConnection"));
 });
-builder.Services.AddSingleton(u => new BlobServiceClient(builder.Configuration.GetConnectionString("StorageAccount")));
-builder.Services.AddSingleton<IBlobService, BlobService>();
+builder.Services.AddAutoMapper(typeof(MapperProfile));
+
+builder
+    .Services
+    .AddControllers()
+    .AddFluentValidation(fv => fv.RegisterValidatorsFromAssemblyContaining<AddMenuItemValidator>());
+
 builder.Services.AddIdentity<ApplicationUser, IdentityRole>().AddEntityFrameworkStores<ApplicationDbContext>();
 builder.Services.Configure<IdentityOptions>(options =>
 {
@@ -29,6 +39,9 @@ builder.Services.Configure<IdentityOptions>(options =>
     options.Password.RequireUppercase = false;
     options.Password.RequireNonAlphanumeric = false;
 });
+
+builder.Services.AddSingleton(u => new BlobServiceClient(builder.Configuration.GetConnectionString("StorageAccount")));
+builder.Services.AddProjectDependencies(builder.Configuration);
 
 var key = builder.Configuration.GetValue<string>("ApiSettings:Secret");
 
@@ -50,7 +63,6 @@ builder.Services.AddAuthentication(u =>
 });
 
 builder.Services.AddCors();
-
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
@@ -84,18 +96,16 @@ builder.Services.AddSwaggerGen(options =>
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
 }
 
+app.UseMiddleware<ExceptionHandlingMiddleware>();
 app.UseHttpsRedirection();
 app.UseCors(o => o.AllowAnyHeader().AllowAnyMethod().AllowAnyOrigin());
 app.UseAuthorization();
-
 app.MapControllers();
 
 app.Run();
-

@@ -1,145 +1,68 @@
-﻿using System.IdentityModel.Tokens.Jwt;
-using System.Net;
-using System.Security.Claims;
-using System.Text;
+﻿#region
+
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.IdentityModel.Tokens;
-using Taste_Haven_API.Data;
 using Taste_Haven_API.Models;
 using Taste_Haven_API.Models.Dto;
+using Taste_Haven_API.Services;
 using Taste_Haven_API.Utility;
+
+#endregion
 
 namespace Taste_Haven_API.Controllers;
 
 [Route("api/auth")]
 [ApiController]
-public class AuthController : ControllerBase
+public class AuthController(
+    UserManager<ApplicationUser> userManager,
+    RoleManager<IdentityRole> roleManager,
+    IJwtService jwtService)
+    : ControllerBase
 {
-    private readonly ApplicationDbContext _db;
-    private readonly ApiResponse _response;
-    private readonly UserManager<ApplicationUser> _userManager;
-    private readonly RoleManager<IdentityRole> _roleManager;
-    private string secretKey;
-
-    public AuthController(ApplicationDbContext db, IConfiguration configuration,
-        UserManager<ApplicationUser> userManager,
-        RoleManager<IdentityRole> roleManager)
-    {
-        _db = db;
-        _response = new ApiResponse();
-        secretKey = configuration.GetValue<string>("ApiSettings:Secret");
-        _userManager = userManager;
-        _roleManager = roleManager;
-    }
-
-    [HttpPost]
-    public async Task<IActionResult> Register([FromBody] RegisterRequestDTO model)
-    {
-        var userFromDb =
-            _db.ApplicationUsers.FirstOrDefault(u => u.UserName.ToLower() == model.UserName.ToLower());
-
-        if (userFromDb != null)
-        {
-            _response.StatusCode = HttpStatusCode.BadRequest;
-            _response.IsSuccess = false;
-            _response.ErrorMessages.Add("Username already exists");
-            return BadRequest(_response);
-        }
-
-        ApplicationUser newUser = new()
-        {
-            Name = model.Name,
-            Email = model.UserName,
-            UserName = model.UserName,
-            NormalizedEmail = model.UserName.ToUpper()
-        };
-
-        try
-        {
-            var result = await _userManager.CreateAsync(newUser, model.Password);
-            if (result.Succeeded)
-            {
-                if (!_roleManager.RoleExistsAsync(SD.Role_Admin).GetAwaiter().GetResult())
-                {
-                    await _roleManager.CreateAsync(new IdentityRole(SD.Role_Admin));
-                    await _roleManager.CreateAsync(new IdentityRole(SD.Role_Customer));
-                }
-
-                if (model.Role.ToLower() == SD.Role_Admin)
-                    await _userManager.AddToRoleAsync(newUser, SD.Role_Admin);
-                else
-                    await _userManager.AddToRoleAsync(newUser, SD.Role_Customer);
-
-                _response.StatusCode = HttpStatusCode.OK;
-                _response.IsSuccess = true;
-                return Ok(_response);
-            }
-        }
-        catch (Exception)
-        {
-            
-        }
-
-        _response.StatusCode = HttpStatusCode.BadRequest;
-        _response.IsSuccess = false;
-        _response.ErrorMessages.Add("Error while registering");
-        return BadRequest(_response);
-    }
-
     [HttpPost("login")]
-    public async Task<IActionResult> Login([FromBody] LoginRequestDTO model)
+    public async Task<IActionResult> Login([FromBody] LoginRequestDto model)
     {
-        ApplicationUser userFromDb = _db.ApplicationUsers
-            .FirstOrDefault(u => u.UserName.ToLower() == model.UserName.ToLower());
+        var userFromDb = await userManager.FindByNameAsync(model.UserName);
+        if (userFromDb == null || !await userManager.CheckPasswordAsync(userFromDb, model.Password))
+            return BadRequest(new { Message = "Username or password is incorrect", IsSuccess = false });
 
-        bool isValid = await _userManager.CheckPasswordAsync(userFromDb, model.Password);
+        var roles = await userManager.GetRolesAsync(userFromDb);
+        var token = jwtService.GenerateToken(userFromDb, roles);
 
-        if (isValid == false)
+        return Ok(new { Result = new LoginResponseDto { Email = userFromDb.Email, Token = token }, IsSuccess = true });
+    }
+
+    [HttpPost("register")]
+    public async Task<IActionResult> Register([FromBody] RegisterRequestDto model)
+    {
+        var userFromDb = await userManager.FindByNameAsync(model.UserName);
+        if (userFromDb != null) return BadRequest(new { Message = "Username already exists", IsSuccess = false });
+
+        var newUser = new ApplicationUser
         {
-            _response.Result = new LoginResponseDTO();
-            _response.StatusCode = HttpStatusCode.BadRequest;
-            _response.IsSuccess = false;
-            _response.ErrorMessages.Add("Username or password is incorrect");
-            return BadRequest(_response);
-        }
+            UserName = model.UserName,
+            Email = model.UserName,
+            NormalizedEmail = model.UserName.ToUpper(),
+            Name = model.Name
+        };
 
-        var roles = await _userManager.GetRolesAsync(userFromDb);
-        JwtSecurityTokenHandler tokenHandler = new();
-        byte[] key = Encoding.ASCII.GetBytes(secretKey);
-
-        SecurityTokenDescriptor tokenDescriptor = new()
+        var result = await userManager.CreateAsync(newUser, model.Password);
+        if (result.Succeeded)
         {
-            Subject = new ClaimsIdentity(new Claim[]
+            if (!await roleManager.RoleExistsAsync(SD.Role_Admin))
             {
-                new Claim("fullName", userFromDb.Name),
-                new Claim("id", userFromDb.Id.ToString()),
-                new Claim(ClaimTypes.Email, userFromDb.UserName.ToString()),
-                new Claim(ClaimTypes.Role, roles.FirstOrDefault()),
-            }),
-            Expires = DateTime.UtcNow.AddDays(7),
-            SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature)
-        };
+                await roleManager.CreateAsync(new IdentityRole(SD.Role_Admin));
+                await roleManager.CreateAsync(new IdentityRole(SD.Role_Customer));
+            }
 
-        SecurityToken token = tokenHandler.CreateToken(tokenDescriptor);
+            if (model.Role.Equals(SD.Role_Admin, StringComparison.CurrentCultureIgnoreCase))
+                await userManager.AddToRoleAsync(newUser, SD.Role_Admin);
+            else
+                await userManager.AddToRoleAsync(newUser, SD.Role_Customer);
 
-        LoginResponseDTO loginResponse = new()
-        {
-            Email = userFromDb.Email,
-            Token = tokenHandler.WriteToken(token)
-        };
-
-        if (loginResponse.Email == null)
-        {
-            _response.StatusCode = HttpStatusCode.BadRequest;
-            _response.IsSuccess = false;
-            _response.ErrorMessages.Add("Username or password is incorrect");
-            return BadRequest(_response);
+            return Ok(new { Message = "User registered successfully", IsSuccess = true });
         }
 
-        _response.StatusCode = HttpStatusCode.OK;
-        _response.IsSuccess = true;
-        _response.Result = loginResponse;
-        return Ok(_response);
+        return BadRequest(new { Message = "Error while registering", IsSuccess = false });
     }
 }
