@@ -28,7 +28,11 @@ public class OrderRepository(ApplicationDbContext context) : IOrderRepository
 
     public async Task<int> AddAsync(OrderHeader orderHeader)
     {
-        context.OrderHeaders.Add(orderHeader);
+        await context.OrderHeaders.AddAsync(orderHeader);
+        foreach (var details in orderHeader.OrderDetails)
+        {
+            await context.OrderDetails.AddAsync(details);
+        }
         await context.SaveChangesAsync();
         return orderHeader.OrderHeaderId;
     }
@@ -41,7 +45,8 @@ public class OrderRepository(ApplicationDbContext context) : IOrderRepository
 
     public async Task<IEnumerable<OrderHeader>> GetAllAsync()
     {
-        return await context.OrderHeaders.Include(o => o.OrderDetails)
+        return await context.OrderHeaders
+            .Include(o => o.OrderDetails)
             .ThenInclude(od => od.MenuItem)
             .ToListAsync();
     }

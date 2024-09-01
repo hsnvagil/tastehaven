@@ -1,24 +1,102 @@
-import React from 'react';
-import "bootstrap/dist/css/bootstrap.css"
-import "bootstrap/dist/js/bootstrap.js"
-import "bootstrap-icons/font/bootstrap-icons.json"
-import {Header} from '../Components/Layout';
-import {Home, NotFound, MenuItemDetails} from '../Pages';
-import {Routes, Route} from "react-router-dom"
+import React, { useState } from "react";
+import { Footer, Header } from "../Components/Layout";
+import {
+  AccessDenied,
+  AllOrders,
+  AuthenticationTest,
+  AuthenticationTestAdmin,
+  Home,
+  Login,
+  MenuItemDetails,
+  MenuItemList,
+  MenuItemUpsert,
+  MyOrders,
+  NotFound,
+  OrderConfirmed,
+  OrderDetails,
+  Payment,
+  Register,
+  ShoppingCart,
+} from "../Pages";
+import { Routes, Route } from "react-router-dom";
+import { useEffect } from "react";
+import { useDispatch, useSelector } from "react-redux";
+import { useGetShoppingCartQuery } from "../Apis/shoppingCartApi";
+import { setShoppingCart } from "../Storage/Redux/shoppingCartSlice";
+import {jwtDecode} from "jwt-decode";
+import { userModel } from "../Interfaces";
+import { setLoggedInUser } from "../Storage/Redux/userAuthSlice";
+import { RootState } from "../Storage/Redux/store";
 
 function App() {
-    return (
-        <div>
-            <Header/>
-            <div className='pb-5'>
-                <Routes>
-                    <Route path='/' element={<Home/>}></Route>
-                    <Route path='*' element={<NotFound/>}></Route>
-                    <Route path="/menuItemDetails/:menuItemId" element={<MenuItemDetails/>} ></Route>
-                </Routes>
-            </div>
-        </div>
-    );
+  const dispatch = useDispatch();
+  const [skip, setSkip] = useState(true);
+  const userData = useSelector((state: RootState) => state.userAuthStore);
+  const { data, isLoading } = useGetShoppingCartQuery(userData.id, {
+    skip: skip,
+  });
+
+  useEffect(() => {
+    const localToken = localStorage.getItem("token");
+    if (localToken) {
+      const { fullName, id, email, role }: userModel = jwtDecode(localToken);
+      dispatch(setLoggedInUser({ fullName, id, email, role }));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isLoading && data) {
+      dispatch(setShoppingCart(data.result?.cartItems));
+    }
+  }, [data]);
+
+  useEffect(() => {
+    if (userData.id) setSkip(false);
+  }, [userData]);
+
+  return (
+    <div>
+      <Header />
+      <div className="pb-5">
+        <Routes>
+          <Route path="/" element={<Home />}></Route>
+          <Route
+            path="/menu-item-details/:menuItemId"
+            element={<MenuItemDetails />}
+          ></Route>
+          <Route path="/shopping-cart" element={<ShoppingCart />}></Route>
+          <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
+
+          <Route
+            path="/authentication"
+            element={<AuthenticationTest />}
+          ></Route>
+          <Route
+            path="/authorization"
+            element={<AuthenticationTestAdmin />}
+          ></Route>
+          <Route path="/access-denied" element={<AccessDenied />} />
+          <Route path="/payment" element={<Payment />} />
+          <Route
+            path="order/orderconfirmed/:id"
+            element={<OrderConfirmed />}
+          ></Route>
+          <Route path="/order/my-orders" element={<MyOrders />} />
+          <Route path="/order/order-details/:id" element={<OrderDetails />} />
+          <Route path="/order/all-orders" element={<AllOrders />} />
+          <Route path="/menu-item/menu-item-list" element={<MenuItemList />} />
+          <Route
+            path="/menu-item/menu-item-upsert/:id"
+            element={<MenuItemUpsert />}
+          />
+          <Route path="/menu-item/menu-item-upsert" element={<MenuItemUpsert />} />
+          <Route path="*" element={<NotFound />}></Route>
+        </Routes>
+      </div>
+      <Footer />
+    </div>
+  );
 }
 
 export default App;

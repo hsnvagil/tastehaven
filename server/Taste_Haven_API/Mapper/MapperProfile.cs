@@ -17,6 +17,8 @@ public class MapperProfile : Profile
 
         CreateMap<OrderHeaderCreateDto, OrderHeader>().ReverseMap();
         CreateMap<OrderHeaderUpdateDto, OrderHeader>().ReverseMap();
+
+        CreateMap<OrderDetailsCreateDto, OrderDetails>().ReverseMap();
         
         CreateMap<ShoppingCart, ShoppingCartDto>();
         CreateMap<CartItem, CartItemDto>();

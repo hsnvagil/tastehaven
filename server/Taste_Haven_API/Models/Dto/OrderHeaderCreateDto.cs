@@ -10,5 +10,5 @@ public class OrderHeaderCreateDto
     public string StripePaymentIntentID { get; set; }
     public string Status { get; set; }
     public int TotalItems { get; set; }
-    public IEnumerable<OrderDetailsCreateDto> OrderDetailsDTO { get; set; }
+    public IEnumerable<OrderDetailsCreateDto> OrderDetails { get; set; }
 }
